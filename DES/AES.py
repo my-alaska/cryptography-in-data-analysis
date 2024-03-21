@@ -221,6 +221,7 @@ class AES:
         return [key_columns[4*i : 4*(i+1)] for i in range(len(key_columns) // 4)]
 
     def encrypt_block(self, plaintext):
+        self.all_ciphers=[]
         """
         Encrypts a single block of 16 byte long plaintext.
         """
@@ -230,11 +231,22 @@ class AES:
 
         add_round_key(plain_state, self._key_matrices[0])
 
+        perm = bytes_to_bits_binary(matrix2bytes(plain_state))
+        perm = "0"*(128-len(perm)) + perm
+        self.all_ciphers.append(perm)
         for i in range(1, self.n_rounds):
             sub_bytes(plain_state)
             shift_rows(plain_state)
             mix_columns(plain_state)
             add_round_key(plain_state, self._key_matrices[i])
+            old_perm = perm
+            perm = bytes_to_bits_binary(matrix2bytes(plain_state))
+            perm = "0" * (128 - len(perm)) + perm
+            self.all_ciphers.append(perm)
+            xor = "".join(["1" if a != b else "0" for (a, b) in zip(old_perm, perm)])
+            print(sum([1 for i in xor if i == "1"]))
+            print(xor)
+
 
         sub_bytes(plain_state)
         shift_rows(plain_state)
@@ -460,8 +472,14 @@ def get_key_iv(password, salt, workload=100000):
     iv = stretched[:IV_SIZE]
     return aes_key, hmac_key, iv
 
+def set_bit(byte_obj, index):
+    byte_arr = bytearray(byte_obj)
+    byte_index = index // 8
+    bit_index = index % 8
+    byte_arr[byte_index] ^= (1 << bit_index)
+    return bytes(byte_arr)
 
-def encrypt(key, plaintext, workload=100000):
+def encrypt(key, plaintext, workload=100000,change_bit = False):
     """
     Encrypts `plaintext` with `key` using AES-128, an HMAC to verify integrity,
     and PBKDF2 to stretch the given key.
@@ -470,16 +488,20 @@ def encrypt(key, plaintext, workload=100000):
     """
     if isinstance(key, str):
         key = key.encode('utf-8')
+        if change_bit:
+            key = set_bit(key,17)
     if isinstance(plaintext, str):
         plaintext = plaintext.encode('utf-8')
 
+
     salt = os.urandom(SALT_SIZE)
     key, hmac_key, iv = get_key_iv(key, salt, workload)
-    ciphertext = AES(key).encrypt_cbc(plaintext, iv)
+    aes = AES(key)
+    ciphertext = aes.encrypt_cbc(plaintext, iv)
     hmac = new_hmac(hmac_key, salt + ciphertext, 'sha256').digest()
     assert len(hmac) == HMAC_SIZE
 
-    return hmac + salt + ciphertext
+    return hmac + salt + ciphertext, aes.all_ciphers
 
 
 def decrypt(key, ciphertext, workload=100000):
@@ -517,31 +539,20 @@ def benchmark():
     for i in range(30000):
         aes.encrypt_block(message)
 
-__all__ = ["encrypt", "decrypt", "AES"]
+def bytes_to_bits_binary(byte_data):
+    bits_data = bin(int.from_bytes(byte_data, byteorder='big'))[2:]
+    return bits_data
 
 if __name__ == '__main__':
-    import sys
-    write = lambda b: sys.stdout.buffer.write(b)
-    read = lambda: sys.stdin.buffer.read()
+    key = "HelloWorld"
+    text = "alamakot"
 
-    if len(sys.argv) < 2:
-        print('Usage: ./aes.py encrypt "key" "message"')
-        print('Running tests...')
-        # from tests import *
-        # run()
-    elif len(sys.argv) == 2 and sys.argv[1] == 'benchmark':
-        benchmark()
-        exit()
-    elif len(sys.argv) == 3:
-        text = read()
-    elif len(sys.argv) > 3:
-        text = ' '.join(sys.argv[2:])
+    cipher, all_ciphers = encrypt(key, text)
+    cipher2, all_ciphers2 = encrypt(key, text,change_bit=True)
 
-    if 'encrypt'.startswith(sys.argv[1]):
-        write(encrypt(sys.argv[2], text))
-    elif 'decrypt'.startswith(sys.argv[1]):
-        write(decrypt(sys.argv[2], text))
-    else:
-        print('Expected command "encrypt" or "decrypt" in first argument.')
+    for c1,c2 in zip(all_ciphers,all_ciphers2):
+        xor = "".join(["1" if a != b else "0" for (a, b) in zip(c1, c2)])
+        print(xor)
 
-    # encrypt('my secret key', b'0' * 1000000) # 1 MB encrypted in 20 seconds.
+
+    deciphered = decrypt(key, cipher)

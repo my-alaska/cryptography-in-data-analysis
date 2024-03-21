@@ -2,6 +2,7 @@ import textwrap
 import binascii
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 #Funkcje pomocnicze
 get_bin = lambda x, n: format(x, 'b').zfill(n)
@@ -92,8 +93,8 @@ def get_middle_four_bit(bits6):
 def sbox_lookup(sboxcount,first_last,middle4):
     d_first_last = bin2dec(first_last)
     d_middle = bin2dec(middle4)
-    sbox_value = FAKEBOX[sboxcount][d_first_last][d_middle]
-    # sbox_value = SBOX[sboxcount][d_first_last][d_middle]
+    # sbox_value = FAKEBOX[sboxcount][d_first_last][d_middle]
+    sbox_value = SBOX[sboxcount][d_first_last][d_middle]
     return dec2bin(sbox_value)
 
 PERMUTATION_TABLE = [16,7,20,21,29,12,28,17,1,15,23,26,5,18,31,10,
@@ -286,33 +287,49 @@ def generate_keys(key_64bits):
 def DES_encrypt(m,key,printing=False,swap_bit=False):
     chiper = ""
     pt_bits = m
+    if swap_bit:
+        key = key[:10] + str(1 - int(key[10])) + key[11:]
+
     k_bits = key
     roundKeys = generate_keys(k_bits)
     p_plaintext = apply_permutation(INITIAL_PERMUTATION_TABLE,pt_bits)
     L,R = split64bits_in_half(p_plaintext)
-    if swap_bit:
-        R[10] = str(1-int(R[10]))
-    if printing:
-        old_perm = L+R
-        total_sum = [0 for _ in old_perm]
+
+
+
+    old_perm = L+R
+    total_sum = [0 for _ in old_perm]
+
+    all_ciphers = []
     for round in range(16):
+        all_ciphers.append(old_perm)
         newL = R
         newR = XOR(functionF(R,roundKeys[round]),L)
         R_changes = "".join(["1" if a!=b else "0" for (a,b) in zip(R,newR) ])
         R = newR
         L = newL
+
+        perm = L + R
+        # printing
         if printing:
             print("change in R: ",len([r for r in R_changes if r == "1"]))
-            perm = L+R
+
             xor = "".join(["1" if a!=b else "0" for (a,b) in zip(old_perm,perm) ])
             for i,l in enumerate(xor):
                 if l == "1": total_sum[i] += 1
             print("ciphertext change:",xor)
-            old_perm = perm
+        old_perm = perm
+    all_ciphers.append(old_perm)
+
+    # printing
     if printing:
         print(total_sum)
+
+    plt.bar([i for i in range(len(total_sum))],total_sum)
+    plt.show()
+
     cipher = apply_permutation(INVERSE_PERMUTATION_TABLE,R+L)
-    return cipher
+    return cipher, all_ciphers
 
 
 # zaimplementuj deszyfrowanie DES(szyfrogram, klucz w odwrotnej kolejnosci)     
@@ -345,7 +362,15 @@ if __name__ == "__main__":
 
     print("="*30 + "\n")
     print("ENCRYPTION")
-    ciphertext = DES_encrypt(pt, binary_key[:64],printing=True)
+    ciphertext, all_ciphers = DES_encrypt(pt, binary_key[:64])
+
+    ciphertext2, all_ciphers2 = DES_encrypt(pt, binary_key[:64],swap_bit=True)
+
+
+    for c1,c2 in zip(all_ciphers,all_ciphers2):
+        xor = "".join(["1" if a != b else "0" for (a, b) in zip(c1, c2)])
+        print(xor)
+
     print("\n" + "=" * 64)
 
     subkeys = generate_keys(binary_key)
